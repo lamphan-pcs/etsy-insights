@@ -26,6 +26,16 @@ function sendJson(response, statusCode, payload) {
     response.end(JSON.stringify(payload));
 }
 
+function getSingleHeader(request, name) {
+    const raw = request.headers[name.toLowerCase()];
+
+    if (Array.isArray(raw)) {
+        return raw[0] || "";
+    }
+
+    return raw || "";
+}
+
 async function postToEtsyToken(payload) {
     const response = await fetch("https://api.etsy.com/v3/public/oauth/token", {
         method: "POST",
@@ -52,9 +62,61 @@ async function postToEtsyToken(payload) {
     }
 }
 
+async function forwardEtsyGet(request, upstreamPath) {
+    const apiKey = getSingleHeader(request, "x-etsy-api-key");
+    const accessToken = getSingleHeader(request, "x-etsy-access-token");
+
+    if (!apiKey || !accessToken) {
+        return {
+            status: 400,
+            payload: {
+                message:
+                    "Missing Etsy auth headers (x-etsy-api-key, x-etsy-access-token).",
+            },
+        };
+    }
+
+    const response = await fetch(`https://openapi.etsy.com${upstreamPath}`, {
+        method: "GET",
+        headers: {
+            "x-api-key": apiKey,
+            Authorization: `Bearer ${accessToken}`,
+        },
+    });
+
+    const text = await response.text();
+
+    try {
+        return {
+            status: response.status,
+            payload: JSON.parse(text),
+        };
+    } catch {
+        return {
+            status: response.status,
+            payload: {
+                message: text || "Unexpected Etsy API response",
+            },
+        };
+    }
+}
+
 function etsyOauthProxy() {
     const handler = async (request, response, next) => {
         const url = new URL(request.url || "/", "http://localhost");
+
+        if (url.pathname.startsWith("/api/etsy/proxy/")) {
+            if (request.method !== "GET") {
+                sendJson(response, 405, { message: "Method not allowed" });
+                return;
+            }
+
+            const relativePath = url.pathname.replace("/api/etsy/proxy/", "");
+            const upstreamPath = `/v3/application/${relativePath}${url.search}`;
+            const result = await forwardEtsyGet(request, upstreamPath);
+            sendJson(response, result.status, result.payload);
+            return;
+        }
 
         if (
             url.pathname !== "/api/etsy/oauth/token" &&

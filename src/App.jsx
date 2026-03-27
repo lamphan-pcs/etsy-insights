@@ -455,6 +455,36 @@ function App() {
         setSortDirection("asc");
     };
 
+    const fetchEtsyProxy = useCallback(
+        async (relativePath, tokenOverride = "") => {
+            const activeToken = tokenOverride || accessToken;
+
+            if (!apiKey || !activeToken) {
+                throw new Error(
+                    "API key and access token are required for Etsy requests.",
+                );
+            }
+
+            const response = await fetch(`/api/etsy/proxy/${relativePath}`, {
+                headers: {
+                    "x-etsy-api-key": apiKey,
+                    "x-etsy-access-token": activeToken,
+                },
+            });
+
+            const payload = await parseJsonResponse(response);
+
+            if (!response.ok) {
+                throw new Error(
+                    parseProxyError(payload, "Etsy API request failed."),
+                );
+            }
+
+            return payload;
+        },
+        [accessToken, apiKey],
+    );
+
     const handleFetchListings = async () => {
         if (!shopId || !apiKey || !accessToken) {
             setErrorMessage("Shop ID, API key, and access token are required.");
@@ -472,27 +502,8 @@ function App() {
             let hasMore = true;
 
             while (hasMore) {
-                const endpoint = new URL(
-                    `https://openapi.etsy.com/v3/application/shops/${encodeURIComponent(shopId)}/listings/${listingState}`,
-                );
-
-                endpoint.searchParams.set("limit", String(pageSize));
-                endpoint.searchParams.set("offset", String(offset));
-
-                const response = await fetch(endpoint, {
-                    headers: {
-                        "x-api-key": apiKey,
-                        Authorization: `Bearer ${accessToken}`,
-                    },
-                });
-
-                if (!response.ok) {
-                    throw new Error(
-                        `Etsy API request failed (${response.status} ${response.statusText}).`,
-                    );
-                }
-
-                const payload = await response.json();
+                const path = `shops/${encodeURIComponent(shopId)}/listings/${listingState}?limit=${encodeURIComponent(pageSize)}&offset=${encodeURIComponent(offset)}`;
+                const payload = await fetchEtsyProxy(path);
                 const pageResults = Array.isArray(payload.results)
                     ? payload.results
                     : [];
@@ -552,28 +563,7 @@ function App() {
                 );
             }
 
-            const authHeaders = {
-                "x-api-key": apiKey,
-                Authorization: `Bearer ${activeToken}`,
-            };
-
-            const meResponse = await fetch(
-                "https://openapi.etsy.com/v3/application/users/me",
-                {
-                    headers: authHeaders,
-                },
-            );
-
-            const mePayload = await parseJsonResponse(meResponse);
-
-            if (!meResponse.ok) {
-                throw new Error(
-                    parseProxyError(
-                        mePayload,
-                        "Could not fetch current Etsy user profile.",
-                    ),
-                );
-            }
+            const mePayload = await fetchEtsyProxy("users/me", activeToken);
 
             const normalizedShops = [];
 
@@ -585,16 +575,11 @@ function App() {
             }
 
             if (!normalizedShops.length && mePayload.user_id) {
-                const byOwnerResponse = await fetch(
-                    `https://openapi.etsy.com/v3/application/users/${encodeURIComponent(mePayload.user_id)}/shops`,
-                    {
-                        headers: authHeaders,
-                    },
-                );
-
-                const byOwnerPayload = await parseJsonResponse(byOwnerResponse);
-
-                if (byOwnerResponse.ok) {
+                try {
+                    const byOwnerPayload = await fetchEtsyProxy(
+                        `users/${encodeURIComponent(mePayload.user_id)}/shops`,
+                        activeToken,
+                    );
                     const shops = Array.isArray(byOwnerPayload.results)
                         ? byOwnerPayload.results
                         : byOwnerPayload.shop_id
@@ -611,20 +596,17 @@ function App() {
                             shopName: shop.shop_name || "Unnamed shop",
                         });
                     });
+                } catch {
+                    // Ignore fallback error and continue to legacy route.
                 }
             }
 
             if (!normalizedShops.length) {
-                const legacyResponse = await fetch(
-                    "https://openapi.etsy.com/v3/application/users/me/shops",
-                    {
-                        headers: authHeaders,
-                    },
-                );
-
-                const legacyPayload = await parseJsonResponse(legacyResponse);
-
-                if (legacyResponse.ok) {
+                try {
+                    const legacyPayload = await fetchEtsyProxy(
+                        "users/me/shops",
+                        activeToken,
+                    );
                     const shops = Array.isArray(legacyPayload.results)
                         ? legacyPayload.results
                         : [];
@@ -639,6 +621,8 @@ function App() {
                             shopName: shop.shop_name || "Unnamed shop",
                         });
                     });
+                } catch {
+                    // Ignore legacy route error.
                 }
             }
 
@@ -656,7 +640,7 @@ function App() {
 
             return dedupedShops;
         },
-        [accessToken, apiKey],
+        [accessToken, apiKey, fetchEtsyProxy],
     );
 
     const handleFindShopId = async () => {
