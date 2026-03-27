@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 const CORE_COLUMNS = [
   'listing_id',
@@ -17,6 +17,7 @@ const LISTING_STATES = ['active', 'draft', 'inactive', 'sold', 'expired']
 
 const MAX_ROWS_PREVIEW = [25, 50, 100, 250, 500]
 const OAUTH_SESSION_KEY = 'etsy_oauth_session'
+const FORM_DRAFT_SESSION_KEY = 'etsy_form_draft'
 const DEFAULT_OAUTH_SCOPES = 'listings_r shops_r'
 
 function flattenObject(value, prefix = '', output = {}) {
@@ -165,6 +166,20 @@ function parseProxyError(payload, fallback) {
   return payload.error_description || payload.error || payload.message || fallback
 }
 
+async function parseJsonResponse(response) {
+  const text = await response.text()
+
+  if (!text) {
+    return {}
+  }
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    return { message: text }
+  }
+}
+
 function clearOAuthQueryParams() {
   const url = new URL(window.location.href)
   url.searchParams.delete('code')
@@ -174,7 +189,28 @@ function clearOAuthQueryParams() {
   window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
 }
 
+function readSavedFormDraft() {
+  try {
+    const raw = sessionStorage.getItem(FORM_DRAFT_SESSION_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+function clampNumber(value, fallback, min, max) {
+  const next = Number(value)
+
+  if (Number.isNaN(next)) {
+    return fallback
+  }
+
+  return Math.max(min, Math.min(max, next))
+}
+
 function App() {
+  const savedDraft = useMemo(() => readSavedFormDraft(), [])
+
   const callbackData = useMemo(() => {
     const params = new URLSearchParams(window.location.search)
 
@@ -186,33 +222,45 @@ function App() {
     }
   }, [])
 
-  const [shopId, setShopId] = useState(import.meta.env.VITE_ETSY_SHOP_ID || '')
+  const [shopId, setShopId] = useState(
+    savedDraft.shopId || import.meta.env.VITE_ETSY_SHOP_ID || '',
+  )
   const [apiKey, setApiKey] = useState(
-    import.meta.env.VITE_ETSY_API_KEY || import.meta.env.VITE_ETSY_KEYSTRING || '',
+    savedDraft.apiKey || import.meta.env.VITE_ETSY_API_KEY || import.meta.env.VITE_ETSY_KEYSTRING || '',
   )
-  const [sharedSecret, setSharedSecret] = useState('')
-  const [accessToken, setAccessToken] = useState(import.meta.env.VITE_ETSY_ACCESS_TOKEN || '')
-  const [refreshToken, setRefreshToken] = useState('')
-  const [tokenExpiresAt, setTokenExpiresAt] = useState('')
-  const [oauthRedirectUri, setOauthRedirectUri] = useState(
-    import.meta.env.VITE_ETSY_REDIRECT_URI || `${window.location.origin}${window.location.pathname}`,
+  const [sharedSecret, setSharedSecret] = useState(savedDraft.sharedSecret || '')
+  const [accessToken, setAccessToken] = useState(
+    savedDraft.accessToken || import.meta.env.VITE_ETSY_ACCESS_TOKEN || '',
   )
+  const [refreshToken, setRefreshToken] = useState(savedDraft.refreshToken || '')
+  const [tokenExpiresAt, setTokenExpiresAt] = useState(savedDraft.tokenExpiresAt || '')
+  const [oauthRedirectUri, setOauthRedirectUri] = useState(() => {
+    const defaultRedirectUri =
+      import.meta.env.VITE_ETSY_REDIRECT_URI || `${window.location.origin}${window.location.pathname}`
+
+    return savedDraft.oauthRedirectUri || defaultRedirectUri
+  })
   const [oauthScopes, setOauthScopes] = useState(
-    import.meta.env.VITE_ETSY_OAUTH_SCOPES || DEFAULT_OAUTH_SCOPES,
+    savedDraft.oauthScopes || import.meta.env.VITE_ETSY_OAUTH_SCOPES || DEFAULT_OAUTH_SCOPES,
   )
   const [oauthMessage, setOauthMessage] = useState('')
-  const [listingState, setListingState] = useState('active')
-  const [pageSize, setPageSize] = useState(100)
+  const [listingState, setListingState] = useState(savedDraft.listingState || 'active')
+  const [pageSize, setPageSize] = useState(clampNumber(savedDraft.pageSize, 100, 1, 100))
   const [loading, setLoading] = useState(false)
   const [statusMessage, setStatusMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [allRows, setAllRows] = useState([])
   const [visibleColumns, setVisibleColumns] = useState([])
-  const [searchText, setSearchText] = useState('')
+  const [searchText, setSearchText] = useState(savedDraft.searchText || '')
   const [sortKey, setSortKey] = useState('listing_id')
   const [sortDirection, setSortDirection] = useState('asc')
-  const [previewCount, setPreviewCount] = useState(100)
+  const [previewCount, setPreviewCount] = useState(
+    MAX_ROWS_PREVIEW.includes(Number(savedDraft.previewCount))
+      ? Number(savedDraft.previewCount)
+      : 100,
+  )
   const [copyMessage, setCopyMessage] = useState('')
+  const autoExchangeAttemptedRef = useRef(false)
 
   useEffect(() => {
     if (callbackData.error) {
@@ -223,9 +271,42 @@ function App() {
     }
 
     if (callbackData.code) {
-      setOauthMessage('Authorization code detected. Click Exchange Code to create token.')
+      setOauthMessage('Authorization code detected. Exchanging automatically when possible...')
     }
   }, [callbackData])
+
+  useEffect(() => {
+    sessionStorage.setItem(
+      FORM_DRAFT_SESSION_KEY,
+      JSON.stringify({
+        shopId,
+        apiKey,
+        sharedSecret,
+        accessToken,
+        refreshToken,
+        tokenExpiresAt,
+        oauthRedirectUri,
+        oauthScopes,
+        listingState,
+        pageSize,
+        previewCount,
+        searchText,
+      }),
+    )
+  }, [
+    accessToken,
+    apiKey,
+    listingState,
+    oauthRedirectUri,
+    oauthScopes,
+    pageSize,
+    previewCount,
+    refreshToken,
+    searchText,
+    sharedSecret,
+    shopId,
+    tokenExpiresAt,
+  ])
 
   const allColumns = useMemo(() => {
     const unique = new Set()
@@ -428,20 +509,26 @@ function App() {
     }
   }
 
-  const handleExchangeCode = async () => {
+  const exchangeCode = useCallback(async ({ automatic = false } = {}) => {
     if (!callbackData.code) {
-      setErrorMessage('No OAuth code found in URL. Click Start OAuth Login first.')
+      if (!automatic) {
+        setErrorMessage('No OAuth code found in URL. Click Start OAuth Login first.')
+      }
       return
     }
 
     if (!apiKey || !sharedSecret) {
-      setErrorMessage('API key and shared secret are required to exchange code.')
+      if (!automatic) {
+        setErrorMessage('API key and shared secret are required to exchange code.')
+      }
       return
     }
 
     const sessionRaw = sessionStorage.getItem(OAUTH_SESSION_KEY)
     if (!sessionRaw) {
-      setErrorMessage('OAuth session is missing. Start OAuth Login again.')
+      if (!automatic) {
+        setErrorMessage('OAuth session is missing. Start OAuth Login again.')
+      }
       return
     }
 
@@ -449,17 +536,23 @@ function App() {
     try {
       session = JSON.parse(sessionRaw)
     } catch {
-      setErrorMessage('OAuth session is invalid. Start OAuth Login again.')
+      if (!automatic) {
+        setErrorMessage('OAuth session is invalid. Start OAuth Login again.')
+      }
       return
     }
 
     if (!session.codeVerifier || !session.state) {
-      setErrorMessage('OAuth verifier/state is missing. Start OAuth Login again.')
+      if (!automatic) {
+        setErrorMessage('OAuth verifier/state is missing. Start OAuth Login again.')
+      }
       return
     }
 
     if (callbackData.state && callbackData.state !== session.state) {
-      setErrorMessage('OAuth state mismatch. Start OAuth Login again.')
+      if (!automatic) {
+        setErrorMessage('OAuth state mismatch. Start OAuth Login again.')
+      }
       return
     }
 
@@ -482,7 +575,7 @@ function App() {
         }),
       })
 
-      const payload = await response.json()
+      const payload = await parseJsonResponse(response)
       if (!response.ok) {
         throw new Error(parseProxyError(payload, 'OAuth token exchange failed.'))
       }
@@ -503,7 +596,25 @@ function App() {
     } finally {
       setLoading(false)
     }
+  }, [apiKey, callbackData.code, callbackData.state, oauthRedirectUri, sharedSecret])
+
+  const handleExchangeCode = async () => {
+    await exchangeCode({ automatic: false })
   }
+
+  useEffect(() => {
+    if (!callbackData.code || autoExchangeAttemptedRef.current) {
+      return
+    }
+
+    if (!apiKey || !sharedSecret) {
+      setOauthMessage('Authorization code detected. Add shared secret, then exchange code.')
+      return
+    }
+
+    autoExchangeAttemptedRef.current = true
+    void exchangeCode({ automatic: true })
+  }, [apiKey, callbackData.code, exchangeCode, sharedSecret])
 
   const handleRefreshAccessToken = async () => {
     if (!refreshToken) {
@@ -533,7 +644,7 @@ function App() {
         }),
       })
 
-      const payload = await response.json()
+      const payload = await parseJsonResponse(response)
       if (!response.ok) {
         throw new Error(parseProxyError(payload, 'OAuth refresh failed.'))
       }

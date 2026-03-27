@@ -53,8 +53,13 @@ async function postToEtsyToken(payload) {
 }
 
 function etsyOauthProxy() {
-  const handler = async (request, response) => {
+  const handler = async (request, response, next) => {
     const url = new URL(request.url || '/', 'http://localhost')
+
+    if (url.pathname !== '/api/etsy/oauth/token' && url.pathname !== '/api/etsy/oauth/refresh') {
+      next()
+      return
+    }
 
     if (request.method !== 'POST') {
       sendJson(response, 405, { message: 'Method not allowed' })
@@ -115,8 +120,7 @@ function etsyOauthProxy() {
   return {
     name: 'etsy-oauth-proxy',
     configureServer(server) {
-      server.middlewares.use('/api/etsy/oauth/token', handler)
-      server.middlewares.use('/api/etsy/oauth/refresh', handler)
+      server.middlewares.use(handler)
     },
   }
 }

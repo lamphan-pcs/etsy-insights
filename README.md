@@ -39,9 +39,10 @@ Small React + Tailwind tool to pull listing data from Etsy official API and past
 
 1. Fill API Key (keystring), Shared Secret, Redirect URI, and scopes.
 2. Click Start OAuth Login and authorize in Etsy.
-3. After you return to the app URL with a code, click Exchange Code.
-4. Access token and refresh token are auto-filled.
-5. Use Refresh Token when needed.
+3. Return to the app URL after Etsy authorization.
+4. If your API key + shared secret are already filled, code exchange runs automatically.
+5. If needed, click Exchange Code manually.
+6. Use Refresh Token when needed.
 
 The local Vite dev server exposes OAuth helper routes:
 
