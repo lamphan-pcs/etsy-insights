@@ -64,6 +64,7 @@ async function postToEtsyToken(payload) {
 
 async function forwardEtsyGet(request, upstreamPath) {
     const apiKey = getSingleHeader(request, "x-etsy-api-key");
+    const sharedSecret = getSingleHeader(request, "x-etsy-shared-secret");
     const accessToken = getSingleHeader(request, "x-etsy-access-token");
 
     if (!apiKey || !accessToken) {
@@ -76,10 +77,15 @@ async function forwardEtsyGet(request, upstreamPath) {
         };
     }
 
+    const composedApiKey =
+        sharedSecret && !apiKey.includes(":")
+            ? `${apiKey}:${sharedSecret}`
+            : apiKey;
+
     const response = await fetch(`https://openapi.etsy.com${upstreamPath}`, {
         method: "GET",
         headers: {
-            "x-api-key": apiKey,
+            "x-api-key": composedApiKey,
             Authorization: `Bearer ${accessToken}`,
         },
     });

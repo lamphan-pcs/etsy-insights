@@ -468,6 +468,7 @@ function App() {
             const response = await fetch(`/api/etsy/proxy/${relativePath}`, {
                 headers: {
                     "x-etsy-api-key": apiKey,
+                    "x-etsy-shared-secret": sharedSecret,
                     "x-etsy-access-token": activeToken,
                 },
             });
@@ -482,7 +483,7 @@ function App() {
 
             return payload;
         },
-        [accessToken, apiKey],
+        [accessToken, apiKey, sharedSecret],
     );
 
     const handleFetchListings = async () => {
