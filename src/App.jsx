@@ -307,6 +307,7 @@ function App() {
     const [statusMessage, setStatusMessage] = useState("");
     const [errorMessage, setErrorMessage] = useState("");
     const [allRows, setAllRows] = useState([]);
+    const [rawProductResponses, setRawProductResponses] = useState([]);
     const [ownedShops, setOwnedShops] = useState([]);
     const [visibleColumns, setVisibleColumns] = useState([]);
     const [searchText, setSearchText] = useState(savedDraft.searchText || "");
@@ -499,12 +500,17 @@ function App() {
 
         try {
             const combinedListings = [];
+            const capturedResponses = [];
             let offset = 0;
             let hasMore = true;
 
             while (hasMore) {
                 const path = `shops/${encodeURIComponent(shopId)}/listings/${listingState}?limit=${encodeURIComponent(pageSize)}&offset=${encodeURIComponent(offset)}`;
                 const payload = await fetchEtsyProxy(path);
+                capturedResponses.push({
+                    path,
+                    payload,
+                });
                 const pageResults = Array.isArray(payload.results)
                     ? payload.results
                     : [];
@@ -536,6 +542,7 @@ function App() {
             });
 
             setAllRows(mappedRows);
+            setRawProductResponses(capturedResponses);
             setDefaultColumns(
                 Array.from(
                     new Set(mappedRows.flatMap((row) => Object.keys(row))),
@@ -552,6 +559,59 @@ function App() {
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleOpenRawProductsPopup = () => {
+        if (!rawProductResponses.length) {
+            setErrorMessage(
+                "No product response captured yet. Fetch listings first.",
+            );
+            return;
+        }
+
+        const popup = window.open(
+            "",
+            "etsy-products-response",
+            "width=1100,height=780,scrollbars=yes,resizable=yes",
+        );
+
+        if (!popup) {
+            setErrorMessage(
+                "Popup blocked by browser. Allow popups for this site.",
+            );
+            return;
+        }
+
+        const payload = {
+            captured_at: new Date().toISOString(),
+            pages: rawProductResponses.length,
+            responses: rawProductResponses,
+        };
+
+        const formatted = JSON.stringify(payload, null, 2)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+
+        popup.document.open();
+        popup.document.write(`<!doctype html>
+<html>
+    <head>
+        <title>Etsy Product Server Response</title>
+        <style>
+            body { margin: 0; font-family: Consolas, monospace; background: #0b1020; color: #e2e8f0; }
+            .bar { padding: 10px 14px; background: #111827; border-bottom: 1px solid #334155; }
+            .title { font-size: 14px; font-weight: 700; }
+            pre { margin: 0; padding: 14px; white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
+        </style>
+    </head>
+    <body>
+        <div class="bar"><div class="title">Raw Etsy product response (proxied server payload)</div></div>
+        <pre>${formatted}</pre>
+    </body>
+</html>`);
+        popup.document.close();
+        popup.focus();
     };
 
     const fetchMyShops = useCallback(
@@ -1214,6 +1274,14 @@ function App() {
                             className='rounded-xl border border-(--line) bg-[#102a43] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#0f3151] disabled:cursor-not-allowed disabled:opacity-60'
                         >
                             {loading ? "Loading..." : "Fetch All Listings"}
+                        </button>
+                        <button
+                            type='button'
+                            onClick={handleOpenRawProductsPopup}
+                            disabled={!rawProductResponses.length}
+                            className='mt-2 rounded-xl border border-(--line) bg-[#334155] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#475569] disabled:cursor-not-allowed disabled:opacity-60'
+                        >
+                            Open Raw Server Response
                         </button>
                     </div>
 
