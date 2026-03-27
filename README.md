@@ -42,7 +42,8 @@ Small React + Tailwind tool to pull listing data from Etsy official API and past
 3. Return to the app URL after Etsy authorization.
 4. If your API key + shared secret are already filled, code exchange runs automatically.
 5. If needed, click Exchange Code manually.
-6. Use Refresh Token when needed.
+6. Click Find My Shop ID to auto-fill your shop_id from Etsy.
+7. Use Refresh Token when needed.
 
 The local Vite dev server exposes OAuth helper routes:
 
