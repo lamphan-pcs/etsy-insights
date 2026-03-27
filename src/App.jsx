@@ -552,39 +552,109 @@ function App() {
                 );
             }
 
-            const response = await fetch(
-                "https://openapi.etsy.com/v3/application/users/me/shops",
+            const authHeaders = {
+                "x-api-key": apiKey,
+                Authorization: `Bearer ${activeToken}`,
+            };
+
+            const meResponse = await fetch(
+                "https://openapi.etsy.com/v3/application/users/me",
                 {
-                    headers: {
-                        "x-api-key": apiKey,
-                        Authorization: `Bearer ${activeToken}`,
-                    },
+                    headers: authHeaders,
                 },
             );
 
-            const payload = await parseJsonResponse(response);
+            const mePayload = await parseJsonResponse(meResponse);
 
-            if (!response.ok) {
+            if (!meResponse.ok) {
                 throw new Error(
-                    parseProxyError(payload, "Could not fetch your shops."),
+                    parseProxyError(
+                        mePayload,
+                        "Could not fetch current Etsy user profile.",
+                    ),
                 );
             }
 
-            const shops = Array.isArray(payload.results) ? payload.results : [];
-            const normalizedShops = shops
-                .map((shop) => ({
-                    shopId: String(shop.shop_id ?? ""),
-                    shopName: shop.shop_name || "Unnamed shop",
-                }))
-                .filter((shop) => shop.shopId);
+            const normalizedShops = [];
+
+            if (mePayload.shop_id) {
+                normalizedShops.push({
+                    shopId: String(mePayload.shop_id),
+                    shopName: mePayload.login_name || "My Etsy Shop",
+                });
+            }
+
+            if (!normalizedShops.length && mePayload.user_id) {
+                const byOwnerResponse = await fetch(
+                    `https://openapi.etsy.com/v3/application/users/${encodeURIComponent(mePayload.user_id)}/shops`,
+                    {
+                        headers: authHeaders,
+                    },
+                );
+
+                const byOwnerPayload = await parseJsonResponse(byOwnerResponse);
+
+                if (byOwnerResponse.ok) {
+                    const shops = Array.isArray(byOwnerPayload.results)
+                        ? byOwnerPayload.results
+                        : byOwnerPayload.shop_id
+                          ? [byOwnerPayload]
+                          : [];
+
+                    shops.forEach((shop) => {
+                        if (!shop?.shop_id) {
+                            return;
+                        }
+
+                        normalizedShops.push({
+                            shopId: String(shop.shop_id),
+                            shopName: shop.shop_name || "Unnamed shop",
+                        });
+                    });
+                }
+            }
 
             if (!normalizedShops.length) {
+                const legacyResponse = await fetch(
+                    "https://openapi.etsy.com/v3/application/users/me/shops",
+                    {
+                        headers: authHeaders,
+                    },
+                );
+
+                const legacyPayload = await parseJsonResponse(legacyResponse);
+
+                if (legacyResponse.ok) {
+                    const shops = Array.isArray(legacyPayload.results)
+                        ? legacyPayload.results
+                        : [];
+
+                    shops.forEach((shop) => {
+                        if (!shop?.shop_id) {
+                            return;
+                        }
+
+                        normalizedShops.push({
+                            shopId: String(shop.shop_id),
+                            shopName: shop.shop_name || "Unnamed shop",
+                        });
+                    });
+                }
+            }
+
+            const dedupedShops = Array.from(
+                new Map(
+                    normalizedShops.map((shop) => [shop.shopId, shop]),
+                ).values(),
+            );
+
+            if (!dedupedShops.length) {
                 throw new Error(
                     "No shops were returned for this token. Check account permissions.",
                 );
             }
 
-            return normalizedShops;
+            return dedupedShops;
         },
         [accessToken, apiKey],
     );
